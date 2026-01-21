@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
@@ -14,6 +15,7 @@ DATA_FILE = Path(__file__).with_name("practice_log.json")
 
 @dataclass
 class PracticeSession:
+    id: str
     date: str               # ISO format: YYYY-MM-DD
     instrument: str
     piece: str
@@ -56,8 +58,22 @@ def weekly_summary(top_n: int = 5) -> dict:
 def _load_sessions(path: Path = DATA_FILE) -> List[PracticeSession]:
     if not path.exists():
         return []
+    
     raw = json.loads(path.read_text(encoding="utf-8"))
-    return [PracticeSession(**item) for item in raw]
+    sessions: List[PracticeSession] = []
+    changed = False
+
+    for item in raw:
+        if "id" not in item or not item["id"]:
+            item["id"] = uuid.uuid4().hex
+            changed = True
+        sessions.append(PracticeSession(**item))
+
+    # Persist ids back to disk so they stay stable
+    if changed:
+        _save_sessions(sessions, path)
+
+    return sessions
 
 
 def _save_sessions(sessions: List[PracticeSession], path: Path = DATA_FILE) -> None:
@@ -84,6 +100,7 @@ def add_session(
         raise ValueError("Duration must be a positive number of minutes.")
     
     session = PracticeSession(
+        id=uuid.uuid4().hex,
         date=session_date,
         instrument=instrument.strip(),
         piece=piece.strip(),
@@ -142,13 +159,74 @@ def export_csv(path: Optional[Path] = None) -> Path:
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["date", "instrument", "piece", "duration_minutes", "notes"],
+            fieldnames=["id", "date", "instrument", "piece", "duration_minutes", "notes"],
         )
         writer.writeheader()
         for s in sessions:
             writer.writerow(asdict(s))
 
     return path
+
+def get_session(session_id: str) -> PracticeSession:
+    sessions = _load_sessions()
+    for s in sessions:
+        if s.id == session_id:
+            return s
+    raise ValueError(f"No session found with id: {session_id}")
+
+def update_session(
+    session_id: str,
+    *,
+    session_date: Optional[str] = None,
+    instrument: Optional[str] = None,
+    piece: Optional[str] = None,
+    duration_minutes: Optional[int] = None,
+    notes: Optional[str] = None,
+) -> PracticeSession:
+    sessions = _load_sessions()
+    for i, s in enumerate(sessions):
+        if s.id == session_id:
+            # Validate and apply updates
+            if session_date is not None:
+                datetime.strptime(session_date, "%Y-%m-%d")
+                s.date = session_date
+
+            if instrument is not None:
+                s.instrument = instrument.strip()
+
+            if piece is not None:
+                s.piece = piece.strip()
+
+            if duration_minutes is not None:
+                if duration_minutes <= 0:
+                    raise ValueError("Duration must be a positive number of minutes")
+                s.duration_minutes = duration_minutes
+
+            if notes is not None:
+                s.notes = notes.strip()
+
+            sessions[i] = s
+            _save_sessions(sessions)
+            return s
+        
+    raise ValueError(f"No session found with id: {session_id}")
+
+def delete_session(session_id: str) -> None:
+    sessions = _load_sessions()
+    new_sessions = [s for s in sessions if s.id != session_id]
+    if len(new_sessions) == len(sessions):
+        raise ValueError(f"No sesssion found with id: {session_id}")
+    _save_sessions(new_sessions)
+
+def _resolve_id_prefix(prefix: str) -> str:
+    prefix = prefix.strip()
+    sessions = _load_sessions()
+    matches = [s for s in sessions if s.id.startswith(prefix)]
+    if len(matches) == 0:
+        raise ValueError("No session matches that id/prefix.")
+    if len(matches) > 1:
+        raise ValueError("Multiple sessions match that prefix. Paste full id.")
+    return matches[0].id
 
 def run_cli() -> None:
     while True:
@@ -159,6 +237,8 @@ def run_cli() -> None:
         print("4) Exit")
         print("5) Weekly summary")
         print("6) Export CSV")
+        print("7) Edit session")
+        print("8) Delete session")
 
         choice = input("Choose: ").strip()
 
@@ -189,7 +269,8 @@ def run_cli() -> None:
                 else:
                     for s in sessions:
                         notes_part = f" — {s.notes}" if s.notes else ""
-                        print(f"{s.date} | {s.instrument} | {s.piece} | {s.duration_minutes} min{notes_part}")
+                        short_id = s.id[:8]
+                        print(f"{short_id} | {s.date} | {s.instrument} | {s.piece} | {s.duration_minutes} min{notes_part}")
 
             elif choice == "3":
                 inst = _prompt("Filter instrument (blank = all)", default="").strip() or None
@@ -221,7 +302,42 @@ def run_cli() -> None:
             elif choice == "6":
                 out_path = export_csv()
                 print(f"Exported CSV to : {out_path}")
-            
+
+            elif choice == "7":
+                prefix = _prompt("Enter session id (8-char prefix ok if unique)").strip()
+                full_id = _resolve_id_prefix(prefix)
+                s = next(x for x in _load_sessions() if x.id == full_id)
+                
+                print(f"Editing: {s.id[:8]} | {s.date} | {s.instrument} | {s.piece} | {s.duration_minutes} min")
+
+                new_date = _prompt("New date (YYYY-MM-DD)", default=s.date).strip()
+                new_inst = _prompt("New instrument", default=s.instrument).strip()
+                new_piece = _prompt("New piece", default=s.piece).strip()
+                new_mins_str = _prompt("New duration (minutes)", default=str(s.duration_minutes)).strip()
+                new_notes = _prompt("New notes", default=s.notes).strip()
+
+                updated = update_session(
+                    full_id,
+                    session_date=new_date,
+                    instrument=new_inst,
+                    piece=new_piece,
+                    duration_minutes=int(new_mins_str),
+                    notes=new_notes,
+                )
+                print(f"Updated: {updated.id[:8]} | {updated.date} | {updated.instrument} | {updated.piece} | {updated.duration_minutes} min")
+
+            elif choice == "8":
+                prefix = _prompt("Enter session id (8-char prefix of if unique)").strip()
+                full_id = _resolve_id_prefix(prefix)
+                s = next(x for x in _load_sessions() if x.id == full_id)
+
+                confirm = _prompt(f"Type YES to delete {s.id[:8]} ({s.date} {s.instrument} {s.piece})", default="NO").strip()
+                if confirm == "YES":
+                    delete_session(s.id)
+                    print("Deleted.")
+                else:
+                    print("Canceled.")
+
             else:
                 print("Invalid choice.")
         except Exception as e:

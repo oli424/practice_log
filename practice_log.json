@@ -1,12 +1,6 @@
 [
   {
-    "date": "2026-01-21",
-    "instrument": "Piano",
-    "piece": "Hanon",
-    "duration_minutes": 40,
-    "notes": "First entry"
-  },
-  {
+    "id": "ceb6e1c2c44647549eeeea31ecffbf09",
     "date": "2026-01-21",
     "instrument": "Piano",
     "piece": "Hanon",
@@ -14,17 +8,11 @@
     "notes": "Second entry"
   },
   {
+    "id": "7c7d7544f51d4983990b0e4731f7a8e3",
     "date": "2026-01-21",
     "instrument": "Piano",
     "piece": "Hanon",
     "duration_minutes": 15,
     "notes": "Third entry"
-  },
-  {
-    "date": "2026-01-21",
-    "instrument": "Flute",
-    "piece": "Scales",
-    "duration_minutes": 10,
-    "notes": "First flute entry"
   }
 ]
