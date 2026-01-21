@@ -4,7 +4,7 @@ from datetime import date
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from practice_log import add_session, list_sessions, weekly_summary, export_csv
+from practice_log import add_session, list_sessions, weekly_summary, export_csv, update_session, delete_session
 
 
 def run_gui() -> None:
@@ -33,7 +33,24 @@ def run_gui() -> None:
     var_filter_instrument = tk.StringVar()
     var_filter_since = tk.StringVar()
 
+    # --- UI state ---
+    selected_id = tk.StringVar(value="") # full session id (stable)
+    status_text = tk.StringVar(value="Ready.")
+
     # --- Helpers ---
+    def set_status(msg: str) -> None:
+        status_text.set(msg)
+
+    def clear_form(keep_date: bool = True) -> None:
+        if not keep_date:
+            var_date.set(date.today().isoformat())
+        var_instrument.set("")
+        var_piece.set("")
+        var_minutes.set("")
+        var_notes.set("")
+        selected_id.set("")
+        set_status("Ready.")
+
     def refresh_list() -> None:
         sessions = list_sessions(
             instrument=var_filter_instrument.get().strip() or None,
@@ -41,14 +58,17 @@ def run_gui() -> None:
         )
 
         session_list.delete(*session_list.get_children())
-        for s in sessions[:200]: # keep UI responsive
+
+        # Use iid=session.is so selection gives us the stable id
+        for s in sessions[:500]: # keep UI responsive
             session_list.insert(
                 "",
                 "end",
+                iid=s.id,
                 values=(s.date, s.instrument, s.piece, s.duration_minutes, s.notes),
             )
 
-        # Weekly summary (always based on calendar week, no filters)
+        # Weekly summary (calendar week, no filters)
         try:
             summary = weekly_summary(top_n=5)
             weekly_label.config(
@@ -59,6 +79,22 @@ def run_gui() -> None:
             )
         except Exception:
             weekly_label.config(text="Week summary unavailable.")
+
+        # If current selected id no longer exists, clear selection
+        sid = selected_id.get().strip()
+        if sid and not session_list.exists(sid):
+            selected_id.set("")
+            set_status("Selection cleared (session no longer present).")
+
+    def current_selection_id() -> str:
+        # Prefer internal selected_id; fall back to Treeview selection
+        sid = selected_id.get().strip()
+        if sid:
+            return sid
+        sel = session_list.selection()
+        if not sel:
+            return ""
+        return sel[0] # iid id the id
 
     def on_add() -> None:
         try:
@@ -73,7 +109,7 @@ def run_gui() -> None:
             if not piece:
                 raise ValueError("Piece / exercise is required.")
             
-            add_session(
+            s = add_session(
                 instrument=inst,
                 piece=piece,
                 duration_minutes=mins,
@@ -85,10 +121,73 @@ def run_gui() -> None:
             var_piece.set("")
             var_minutes.set("")
             var_notes.set("")
+            selected_id.set("")
+            set_status(f"Added session {s.id[:8]}.")
 
             refresh_list()
         except Exception as e:
             messagebox.showerror("Could not add session", str(e))
+
+    def on_save_changes() -> None:
+        sid = current_selection_id()
+        if not sid:
+            messagebox.showinfo("No selection", "Select a session row to edit, then click 'Save changes'")
+            return
+        
+        try:
+            d = var_date.get().strip()
+            inst = var_instrument.get().strip()
+            piece = var_piece.get().strip()
+            mins = int(var_minutes.get().strip() or "0")
+            notes = var_notes.get().strip()
+
+            if not inst:
+                raise ValueError("Instrument is required.")
+            if not piece:
+                raise ValueError("Piece / exercise is required.")
+            
+            updated = update_session(
+                sid,
+                session_date=d,
+                instrument=inst,
+                piece=piece,
+                duration_minutes=mins,
+                notes=notes,
+            )
+            set_status(f"Updated session {updated.id[:8]}.")
+            refresh_list()
+
+            # Keep selection on the updated row
+            if session_list.exists(sid):
+                session_list.selection_set(sid)
+                session_list.focus(sid)
+        except Exception as e:
+            messagebox.showerror("Could not save changes", str(e))
+
+    def on_delete() -> None:
+        sid = current_selection_id()
+        if not sid:
+            messagebox.showinfo("No selection", "Select a session row to delete.")
+            return
+        
+        # Get a friendly description from the row values
+        try:
+            vals = session_list.item(sid, "values")
+            desc = f"{vals[0]} | {vals[1]} | {vals[2]} | {vals[3]} mins"
+        except Exception:
+            desc = sid[:8]
+
+        if not messagebox.askyesno("Confirm delete", f"Delete this session?\n\n{desc}"):
+            return
+        
+        try:
+            delete_session(sid)
+            set_status(f"Deleted session {sid[:8]}.")
+            clear_form(keep_date=True)
+            refresh_list()
+        except Exception as e:
+            messagebox.showerror("Could not delete session", str(e))
+
     
     def on_export() -> None:
         try:
@@ -97,7 +196,23 @@ def run_gui() -> None:
         except Exception as e:
             messagebox.showerror("Export failed", str(e))
 
-    # --- Left: Add form ---
+    def on_row_selected(_event=None) -> None:
+        sel = session_list.selection()
+        if not sel:
+            return
+        sid = sel[0]
+        selected_id.set(sid)
+
+        vals = session_list.item(sid, "values")
+        # values: (date, instrument, piece, duration_minutes, notes)
+        var_date.set(vals[0])
+        var_instrument.set(vals[1])
+        var_piece.set(vals[2])
+        var_minutes.set(str(vals[3]))
+        var_notes.set(vals[4])
+        set_status(f"Editing session {sid[:8]} (selected).")
+
+    # --- Left: Add/edit form ---
     ttk.Label(left, text="Add practice session", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 8))
 
     form = ttk.Frame(left)
@@ -115,7 +230,13 @@ def run_gui() -> None:
     field("Duration (minutes)", var_minutes)
     field("Notes (optional)", var_notes)
 
-    ttk.Button(left, text="Add session", command=on_add).pack(fill="x", pady=(12, 0))
+    ttk.Separator(left).pack(fill="x", pady=12)
+
+    ttk.Label(left, text="Actions", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 8))
+    ttk.Button(left, text="Add new session", command=on_add).pack(fill="x", pady=(0, 6))
+    ttk.Button(left, text="Save changes to selected", command=on_save_changes).pack(fill="x", pady=(0, 6))
+    ttk.Button(left, text="Delete selected", command=on_delete).pack(fill="x", pady=(0, 6))
+    ttk.Button(left, text="Clear form / Cancel edit", command=lambda: clear_form(keep_date=True)).pack(fill="x")
 
     ttk.Separator(left).pack(fill="x", pady=12)
 
@@ -125,6 +246,11 @@ def run_gui() -> None:
 
     ttk.Button(left, text="Apply filters / Refresh", command=refresh_list).pack(fill="x", pady=(12, 0))
     ttk.Button(left, text="Export CSV", command=on_export).pack(fill="x", pady=(8, 0))
+
+    ttk.Separator(left).pack(fill="x", pady=12)
+
+    ttk.Label(left, text="Status", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 8))
+    ttk.Label(left, textvariable=status_text, wraplength=320).pack(anchor="w")
 
     # --- Right: Sessions table + weekly summary ---
     weekly_label = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"))
@@ -141,9 +267,14 @@ def run_gui() -> None:
         "minutes": "Minutes",
         "notes": "Notes",
     }
+    widths = {"date": 110, "instrument": 140, "piece": 260, "minutes": 80, "notes": 420}
+
     for c in columns:
         session_list.heading(c, text=headings[c])
-        session_list.column(c, width=120 if c != "notes" else 360, anchor="w")
+        session_list.column(c, width=widths[c], anchor="w")
+
+    # Selection event
+    session_list.bind("<<TreeviewSelect>>", on_row_selected)
 
     # Inital load
     refresh_list()
