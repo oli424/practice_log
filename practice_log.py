@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 import json
+from collections import defaultdict
 from dataclasses import dataclass, asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -19,10 +21,42 @@ class PracticeSession:
     notes: str = ""
 
 
+def _start_of_week(d: date) -> date:
+    # Monday = 0, Sunday = 6
+    return d - timedelta(days=d.weekday())
+
+
+def weekly_summary(top_n: int = 5) -> dict:
+    today = date.today()
+    start = _start_of_week(today)
+    sessions = list_sessions(since=start.isoformat())
+
+    total = sum(s.duration_minutes for s in sessions)
+
+    minutes_by_instrument = defaultdict(int)
+    minutes_by_piece = defaultdict(int)
+
+    for s in sessions:
+        minutes_by_instrument[s.instrument] += s.duration_minutes
+        minutes_by_piece[s.piece] += s.duration_minutes
+
+    top_pieces = sorted(minutes_by_piece.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    instruments_sorted = sorted(minutes_by_instrument.items(), key=lambda x: x[1], reverse=True)
+
+    return {
+        "start_date": start.isoformat(),
+        "end_date": today.isoformat(),
+        "total_minutes": total,
+        "minutes_by_instrument": instruments_sorted,
+        "top_pieces": top_pieces,
+        "session_count": len(sessions),
+    }
+
+
 def _load_sessions(path: Path = DATA_FILE) -> List[PracticeSession]:
     if not path.exists():
         return []
-    raw = json.loads(path.read_text(encoding="utf-b"))
+    raw = json.loads(path.read_text(encoding="utf-8"))
     return [PracticeSession(**item) for item in raw]
 
 
@@ -100,6 +134,22 @@ def _prompt(text: str, default: Optional[str] = None) -> str:
     return value if value else (default or "")
 
 
+def export_csv(path: Optional[Path] = None) -> Path:
+    sessions = list_sessions()
+    if path is None:
+        path = Path(__file__).with_name("practice_export.csv")
+
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["date", "instrument", "piece", "duration_minutes", "notes"],
+        )
+        writer.writeheader()
+        for s in sessions:
+            writer.writerow(asdict(s))
+
+    return path
+
 def run_cli() -> None:
     while True:
         print("\nPractice Log")
@@ -107,6 +157,8 @@ def run_cli() -> None:
         print("2) List sessions")
         print("3) Total minutes")
         print("4) Exit")
+        print("5) Weekly summary")
+        print("6) Export CSV")
 
         choice = input("Choose: ").strip()
 
@@ -147,6 +199,29 @@ def run_cli() -> None:
 
             elif choice == "4":
                 break
+            
+            elif choice ==  "5":
+                summary = weekly_summary(top_n=5)
+                print(f"\nWeek: {summary['start_date']} to {summary['end_date']}")
+                print(f"Sessions: {summary['session_count']}")
+                print(f"Total: {summary['total_minutes']} minutes")
+
+                if summary["minutes_by_instrument"]:
+                    print("\nBy instrument:")
+                    for inst, mins in summary["minutes_by_instrument"]:
+                        print(f"- {inst}: {mins} min")
+
+                if summary["top_pieces"]:
+                    print("\nTop pieces:")
+                    for piece, mins in summary["top_pieces"]:
+                        print(f"- {piece}: {mins} min")
+                else:
+                    print("\nNo sessions logged this week")
+
+            elif choice == "6":
+                out_path = export_csv()
+                print(f"Exported CSV to : {out_path}")
+            
             else:
                 print("Invalid choice.")
         except Exception as e:

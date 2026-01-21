@@ -5,5 +5,12 @@
     "piece": "Hanon",
     "duration_minutes": 40,
     "notes": "First entry"
+  },
+  {
+    "date": "2026-01-21",
+    "instrument": "Piano",
+    "piece": "Hanon",
+    "duration_minutes": 50,
+    "notes": "Second entry"
   }
 ]
