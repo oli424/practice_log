@@ -14,5 +14,13 @@
     "piece": "ARNESEN, Even When He is Silent",
     "duration_minutes": 30,
     "notes": ""
+  },
+  {
+    "id": "55cda641742c49e9a42a786e923cf7fd",
+    "date": "2026-01-21",
+    "instrument": "Piano",
+    "piece": "Hanon",
+    "duration_minutes": 40,
+    "notes": "test"
   }
 ]
