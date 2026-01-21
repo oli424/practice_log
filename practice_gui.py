@@ -41,6 +41,36 @@ def run_gui() -> None:
     def set_status(msg: str) -> None:
         status_text.set(msg)
 
+    def set_mode_ui() -> None:
+        """Update action buttons based on whether a session is selected"""
+        in_edit_mode = bool(selected_id.get().strip())
+
+        if in_edit_mode:
+            # Edit mode
+            btn_add.state(["disabled"])
+            btn_save.state(["!disabled"])
+            btn_delete.state(["!disabled"])
+
+            btn_clear.config(text="Cancel edit")
+            btn_save.config(text="Save changes")
+
+            set_status(f"Edit mode: {selected_id.get()[:8]}")
+        else:
+            # Add mode
+            btn_add.state(["!disabled"])
+            btn_save.state(["disabled"])
+            btn_delete.state(["disabled"])
+
+            btn_clear.config(text="Clear form")
+            btn_save.config(text="Save changes")
+
+    def update_mode_label() -> None:
+        if selected_id.get().strip():
+            mode_label.config(text=f"Mode: Edit ({selected_id.get()[:8]})")
+        else:
+            mode_label.config(text="Mode: Add")
+
+
     def clear_form(keep_date: bool = True) -> None:
         if not keep_date:
             var_date.set(date.today().isoformat())
@@ -51,6 +81,9 @@ def run_gui() -> None:
         selected_id.set("")
         set_status("Ready.")
 
+        update_mode_label()
+        set_mode_ui()
+
     def refresh_list() -> None:
         sessions = list_sessions(
             instrument=var_filter_instrument.get().strip() or None,
@@ -59,7 +92,7 @@ def run_gui() -> None:
 
         session_list.delete(*session_list.get_children())
 
-        # Use iid=session.is so selection gives us the stable id
+        # Use iid=session.id so selection gives us the stable id
         for s in sessions[:500]: # keep UI responsive
             session_list.insert(
                 "",
@@ -85,6 +118,9 @@ def run_gui() -> None:
         if sid and not session_list.exists(sid):
             selected_id.set("")
             set_status("Selection cleared (session no longer present).")
+        
+        update_mode_label()
+        set_mode_ui()
 
     def current_selection_id() -> str:
         # Prefer internal selected_id; fall back to Treeview selection
@@ -122,6 +158,8 @@ def run_gui() -> None:
             var_minutes.set("")
             var_notes.set("")
             selected_id.set("")
+            update_mode_label()
+            set_mode_ui()
             set_status(f"Added session {s.id[:8]}.")
 
             refresh_list()
@@ -163,6 +201,11 @@ def run_gui() -> None:
                 session_list.focus(sid)
         except Exception as e:
             messagebox.showerror("Could not save changes", str(e))
+        # Optional: stay in edit mode (current behavior) OR return to add mode:
+        # selected_id.set("")
+        # session_list.selection_remove(session_list.selection())
+        # clear_form(keep_date=True)
+        # refresh_list()
 
     def on_delete() -> None:
         sid = current_selection_id()
@@ -212,6 +255,9 @@ def run_gui() -> None:
         var_notes.set(vals[4])
         set_status(f"Editing session {sid[:8]} (selected).")
 
+        update_mode_label()
+        set_mode_ui()
+
     # --- Left: Add/edit form ---
     ttk.Label(left, text="Add practice session", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 8))
 
@@ -233,10 +279,18 @@ def run_gui() -> None:
     ttk.Separator(left).pack(fill="x", pady=12)
 
     ttk.Label(left, text="Actions", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 8))
-    ttk.Button(left, text="Add new session", command=on_add).pack(fill="x", pady=(0, 6))
-    ttk.Button(left, text="Save changes to selected", command=on_save_changes).pack(fill="x", pady=(0, 6))
-    ttk.Button(left, text="Delete selected", command=on_delete).pack(fill="x", pady=(0, 6))
-    ttk.Button(left, text="Clear form / Cancel edit", command=lambda: clear_form(keep_date=True)).pack(fill="x")
+
+    btn_add = ttk.Button(left, text="Add new session", command=on_add)
+    btn_add.pack(fill="x", pady=(0, 6))
+
+    btn_save = ttk.Button(left, text="Save changes", command=on_save_changes)
+    btn_save.pack(fill="x", pady=(0, 6))
+
+    btn_delete = ttk.Button(left, text="Delete", command=on_delete)
+    btn_delete.pack(fill="x", pady=(0, 6))
+
+    btn_clear = ttk.Button(left, text="Clear form / Cancel edit", command=lambda: clear_form(keep_date=True))
+    btn_clear.pack(fill="x")
 
     ttk.Separator(left).pack(fill="x", pady=12)
 
@@ -251,6 +305,9 @@ def run_gui() -> None:
 
     ttk.Label(left, text="Status", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 8))
     ttk.Label(left, textvariable=status_text, wraplength=320).pack(anchor="w")
+
+    mode_label = ttk.Label(left, text="Mode: Add", font=("TkDefaultFont", 10, "bold"))
+    mode_label.pack(anchor="w", pady=(0, 6))
 
     # --- Right: Sessions table + weekly summary ---
     weekly_label = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"))
@@ -274,7 +331,10 @@ def run_gui() -> None:
         session_list.column(c, width=widths[c], anchor="w")
 
     # Selection event
-    session_list.bind("<<TreeviewSelect>>", on_row_selected)
+    session_list.bind("<Double-1>", on_row_selected)
+
+    set_mode_ui()
+    update_mode_label()
 
     # Inital load
     refresh_list()
