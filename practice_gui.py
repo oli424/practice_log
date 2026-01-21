@@ -10,7 +10,12 @@ from practice_log import add_session, list_sessions, weekly_summary, export_csv,
 def run_gui() -> None:
     root = tk.Tk()
     root.title("Practice Log")
-    root.geometry("1000x600")
+
+    # Set WM_CLASS for desktop environments (GNOME/KDE)
+    # root.tk.call("tk", "appname", "PracticeLog")         # instance name
+    # root.tk.call("wm", "class", root._w, "PracticeLog")  # class name
+
+    root.geometry("1000x850")
 
     # --- Layout frames ---
     main = ttk.Frame(root, padding=12)
